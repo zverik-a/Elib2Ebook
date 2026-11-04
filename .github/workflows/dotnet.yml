@@ -6,7 +6,9 @@ jobs:
   build:
     strategy:
         matrix:
-          os: [ubuntu-latest, macos-latest, windows-latest]
+          # Без macOS: раннеры macos-latest часто не стартуют за 15 минут, job отменяется и блокирует test/publish.
+          # Сборка под macOS все равно проверяется в job publish.
+          os: [ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
 
