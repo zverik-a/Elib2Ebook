@@ -45,3 +45,6 @@ dist
 .vscode/tasks.json
 
 .dotnet/
+**/Books_*/
+*.lic
+Elib2EbookCli/Elib2EbookCli.sln

@@ -1,4 +1,13 @@
 # Elib2Ebook
+
+> **Модифицированная версия** проекта [OnlyFart/Elib2Ebook](https://github.com/OnlyFart/Elib2Ebook), изменения внесены zverik-a в 2026 г.
+> Основные изменения:
+> * обновлены геттеры lib.social (ranobelib, mangalib, hentailib): новые API/CDN хосты, параметр `--token`, разбор аннотаций;
+> * HTTP/2 клиент, дробная задержка `--delay`, повторы запросов с экспоненциальной задержкой и учетом `Retry-After`, опция `--strict-ssl`;
+> * консольная утилита возвращает код выхода: 0 — успех, 1 — ошибка генерации книги, 2 — неверные параметры/ошибка авторизации;
+> * опциональная конвертация картинок в WebP для epub (`--webp`, `--webp-quality`, `--max-image-size`).
+>
+> Распространяется под той же лицензией GPL-3.0.
 [![GitHub License](https://img.shields.io/github/license/OnlyFart/Elib2Ebook.svg?style=flat-square)](https://github.com/OnlyFart/Elib2Ebook/blob/master/LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/OnlyFart/Elib2Ebook.svg?style=flat-square)](https://github.com/OnlyFart/Elib2Ebook/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/OnlyFart/Elib2Ebook.svg?style=flat-square)](https://github.com/OnlyFart/Elib2Ebook/network)
@@ -179,3 +188,8 @@ docker run --rm -p 8080:8080 onlyfart/elib2ebookweb
 | --additional-types  | Типы дополнительных файлов. Допустимые значения: books, audio, images                     |
 | --book-name-pattern | (По-умолчанию: {Author.Name} - {Book.Title}) Шаблон для имени файла.                      |
 | --flare             | Адрес flaresolverr                                                                        |
+| --strict-ssl        | Проверять SSL сертификаты сайтов (по умолчанию проверка отключена)                        |
+| --token             | Bearer токен для доступа к закрытым главам (lib.social)                                   |
+| --webp              | Конвертировать картинки epub в WebP (уменьшает размер, не все читалки поддерживают)       |
+| --webp-quality      | (По-умолчанию: 85) Качество WebP (1-100)                                                  |
+| --max-image-size    | (По-умолчанию: 0 - без изменений) Максимальная сторона картинки в пикселях при --webp     |
