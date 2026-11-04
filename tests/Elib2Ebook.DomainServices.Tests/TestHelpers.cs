@@ -1,0 +1,38 @@
+using Elib2Ebook.Domain.Book;
+using Elib2Ebook.DomainServices.Configs;
+using Elib2Ebook.DomainServices.Getters;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Elib2Ebook.DomainServices.Tests;
+
+internal static class TestHelpers
+{
+    public static Options CreateOptions(Action<Options> configure = null)
+    {
+        var options = new Options(["https://example.com/book/1"])
+        {
+            Format = ["epub"],
+            Timeout = 10,
+        };
+
+        configure?.Invoke(options);
+        return options;
+    }
+
+    public static BookGetterConfig CreateConfig(Action<Options> configure = null)
+    {
+        return BookGetterConfig.GetDefault(CreateOptions(configure), NullLogger.Instance);
+    }
+}
+
+/// <summary>
+/// Геттер-заглушка, открывающий protected методы GetterBase для тестов
+/// </summary>
+internal class TestGetter(BookGetterConfig config) : GetterBase(config)
+{
+    protected override Uri SystemUrl => new("https://test.invalid/");
+
+    public IEnumerable<T> Slice<T>(ICollection<T> toc, Func<T, string> selector) => SliceToc(toc, selector);
+
+    public override Task<Book> Get(Uri url) => throw new NotSupportedException();
+}
