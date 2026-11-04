@@ -12,6 +12,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -24,7 +26,18 @@ jobs:
       run: dotnet build --no-restore -c release
       
     - name: Test
-      run: dotnet test --no-build --verbosity normal
+      run: dotnet test --no-build -c release --verbosity normal
+
+    # Проверяем форматирование только файлов, измененных в этом форке относительно OnlyFart/Elib2Ebook,
+    # чтобы не переформатировать весь upstream-код (это усложнило бы слияние с ним)
+    - name: Check formatting of fork changes
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        git fetch --no-tags https://github.com/OnlyFart/Elib2Ebook.git master
+        base=$(git merge-base FETCH_HEAD HEAD)
+        mapfile -t files < <(git diff --name-only --diff-filter=AM "$base" HEAD -- '*.cs')
+        if [ ${#files[@]} -eq 0 ]; then echo "Нет измененных .cs файлов"; exit 0; fi
+        dotnet format whitespace Elib2Ebook.sln --verify-no-changes --include "${files[@]}"
       
     - name: Min
       run: >
@@ -52,7 +65,7 @@ jobs:
     name: Check version
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' && github.repository_owner == 'zverik-a'
     outputs:
       VERSION: ${{ steps.get-version.outputs.version }}
       LAST_TAG: ${{ steps.last_release.outputs.tag_name }}
@@ -76,7 +89,8 @@ jobs:
     name: push docker image to hub
     runs-on: ubuntu-latest
     needs: check_version
-    if: ${{ needs.check_version.outputs.LAST_TAG != needs.check_version.outputs.VERSION }}
+    # Публикация в Docker Hub только если задана переменная репозитория DOCKER_PUSH=true и секреты DOCKERHUB_*
+    if: ${{ vars.DOCKER_PUSH == 'true' && needs.check_version.outputs.LAST_TAG != needs.check_version.outputs.VERSION }}
     strategy:
       matrix:
         folder: [ Elib2EbookCli, Elib2EbookWeb ]
