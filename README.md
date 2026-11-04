@@ -7,6 +7,17 @@
 ![Docker Pulls (Web)](https://img.shields.io/docker/pulls/onlyfart/elib2ebookweb?style=flat-square&label=docker%20pulls%20(web))
 ![GitHub Downloads (All)](https://img.shields.io/github/downloads/onlyfart/elib2ebook/total?style=flat-square)
 
+> **Это модифицированная версия (форк)** проекта [OnlyFart/Elib2Ebook](https://github.com/OnlyFart/Elib2Ebook), изменения внесены zverik-a в 2026 г.
+> Распространяется под той же лицензией GPL-3.0. Отличия от оригинала:
+> * **lib.social** (ranobelib, mangalib, hentailib): актуальные хосты API/CDN для hentailib, параметр `--token` для закрытых глав, `old.ranobelib.me`, пропуск недоступной главы вместо падения всей книги;
+> * **EPUB**: опциональное сжатие картинок в WebP (`--webp`, `--webp-quality`, `--max-image-size`), в том числе в веб-версии;
+> * **Сеть**: HTTP/2, дробная задержка `--delay 0.5`, повторы запросов с экспоненциальной задержкой и учетом `Retry-After`, без бессмысленных повторов на 404, надежная обработка редиректов, опция `--strict-ssl`;
+> * **CLI** возвращает код выхода: `0` — успех, `1` — ошибка генерации книги, `2` — неверные параметры, неподдерживаемый сайт или ошибка авторизации;
+> * исправлено падение на ссылке `https://books.yandex.ru/` без пути;
+> * дополнительные тесты (диапазоны глав, повторы запросов, EPUB/WebP, выбор геттера по ссылке).
+>
+> Релизы форка: https://github.com/zverik-a/Elib2Ebook/releases (с суффиксом `-fork`).
+
 **Elib2Ebook** — консольная утилита и веб-приложение для скачивания книг с популярных онлайн-библиотек и литературных сайтов. Поддерживает сохранение в форматах EPUB, FB2, CBZ, JSON, TXT.
 ---
 
@@ -197,14 +208,14 @@ docker run --rm \
 ### Сборка из исходников
 
 ```bash
-git clone https://github.com/OnlyFart/Elib2Ebook.git
+git clone https://github.com/zverik-a/Elib2Ebook.git
 cd Elib2Ebook
 
-dotnet publish Elib2EbookCli/Elib2EbookCli.csproj \
+dotnet publish src/Elib2EbookCli/Elib2EbookCli.csproj \
   -c Release \
   -o ./publish/cli
 
-dotnet publish Elib2EbookWeb/Elib2EbookWeb.csproj \
+dotnet publish src/Elib2EbookWeb/Elib2EbookWeb.csproj \
   -c Release \
   -o ./publish/web
 ```
@@ -231,6 +242,9 @@ Elib2EbookCli --url https://author.today/work/212721,https://litnet.com/book/123
 ```bash
 # Базовая авторизация (логин + пароль)
 Elib2EbookCli -u https://author.today/work/212721 -f epub --login vasya --password pupkin
+
+# lib.social: Bearer токен для закрытых глав
+Elib2EbookCli -u https://ranobelib.me/ru/book/12345--slug -f epub --token <токен>
 ```
 
 ### Сеть и прокси
@@ -357,7 +371,7 @@ Elib2EbookCli -u https://author.today/work/212721 -f epub --book-name-pattern "{
 | `--save`                | `-s`  | ❌           | Текущая директория                   | Путь для сохранения книги                                     |
 | `--cover`               | `-c`  | ❌           | `false`                              | Сохранить обложку отдельным файлом                            |
 | `--timeout`             | `-t`  | ❌           | `120`                                | Таймаут HTTP-запросов в секундах                              |
-| `--delay`               | `-d`  | ❌           | `0`                                  | Задержка между запросами в секундах                           |
+| `--delay`               | `-d`  | ❌           | `0`                                  | Задержка между запросами в секундах (можно дробную: `0.5`)    |
 | `--no-image`            | —     | ❌           | `false`                              | Не загружать изображения                                      |
 | `--start`               | —     | ❌           | —                                    | Номер первой главы (отрицательное — с конца)                  |
 | `--end`                 | —     | ❌           | —                                    | Номер последней главы (отрицательное — с конца)               |
@@ -369,6 +383,11 @@ Elib2EbookCli -u https://author.today/work/212721 -f epub --book-name-pattern "{
 | `--additional`          | —     | ❌           | `false`                              | Сохранить дополнительные файлы (аудио, оригиналы)             |
 | `--additional-types`    | —     | ❌           | Все типы                             | Типы доп. файлов: `books`, `audio`, `images`                  |
 | `--book-name-pattern`   | —     | ❌           | `{Author.Name} - {Book.Title}`       | Шаблон имени выходного файла                                  |
+| `--token`               | —     | ❌           | —                                    | Bearer токен для закрытых глав (lib.social)                   |
+| `--strict-ssl`          | —     | ❌           | `false`                              | Проверять SSL сертификаты сайтов                              |
+| `--webp`                | —     | ❌           | `false`                              | Сжимать картинки EPUB в WebP (не все читалки поддерживают)    |
+| `--webp-quality`        | —     | ❌           | `85`                                 | Качество WebP (1-100)                                         |
+| `--max-image-size`      | —     | ❌           | `0` (без изменений)                  | Максимальная сторона картинки в пикселях при `--webp`         |
 
 ---
 

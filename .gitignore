@@ -35,3 +35,6 @@ packages/
 
 # dotnet tools
 .dotnet/
+# Вывод веб-версии и лицензионные ключи
+**/Books_*/
+*.lic
