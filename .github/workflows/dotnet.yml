@@ -176,16 +176,31 @@ jobs:
     steps:
       - name: check repository
         uses: actions/checkout@v5
+        with:
+          # Нужна вся история и теги, чтобы найти предыдущий релиз
+          fetch-depth: 0
 
       - name: create release
-        uses: softprops/action-gh-release@v3.0.1
         id: create_release
-        with:
-          draft: false
-          prerelease: false
-          name: ${{needs.check_version.outputs.VERSION}}
-          tag_name: ${{needs.check_version.outputs.VERSION}}
-          token: ${{ github.token }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check_version.outputs.VERSION }}
+        run: |
+          # Начало списка изменений: последний релиз форка (*-fork), иначе последний тег upstream в истории
+          START=$(git tag --merged HEAD --list '*-fork' --sort=-creatordate | head -n1)
+          [ -z "$START" ] && START=$(git describe --tags --abbrev=0 HEAD)
+          echo "Изменения с $START"
+
+          # Список коммитов (в форке изменения обычно идут прямыми пушами, без PR)
+          {
+            echo "## Коммиты с $START"
+            echo
+            git log --no-merges --pretty='- %s (%h)' "$START"..HEAD
+          } > notes.md
+
+          # --generate-notes дописывает PR и ссылку Full Changelog от GitHub
+          gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" \
+            --notes-file notes.md --generate-notes --notes-start-tag "$START"
 
       - name: save tag name
         id: tag_name
