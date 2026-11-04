@@ -169,6 +169,9 @@ jobs:
   create_release:
     needs: check_version
     runs-on: ubuntu-latest
+    # Токен по умолчанию в форке только на чтение — для релиза нужна запись
+    permissions:
+      contents: write
     if: ${{ needs.check_version.outputs.LAST_TAG != needs.check_version.outputs.VERSION }}
     outputs:
       TAG_NAME: ${{ steps.tag_name.outputs.tag }}
@@ -209,6 +212,9 @@ jobs:
   upload_release:
     needs: [create_release, publish]
     runs-on: ubuntu-latest
+    # Токен по умолчанию в форке только на чтение — для релиза нужна запись
+    permissions:
+      contents: write
     strategy:
       matrix:
         # macOS форком пока не поддерживается
