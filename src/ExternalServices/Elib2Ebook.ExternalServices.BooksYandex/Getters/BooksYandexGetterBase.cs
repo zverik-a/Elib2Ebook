@@ -22,7 +22,8 @@ public abstract class BooksYandexGetterBase(BookGetterConfig config) : GetterBas
 
     public override bool IsSameUrl(Uri url)
     {
-        return base.IsSameUrl(url) && Paths.Any(path => string.Equals(url.GetSegment(1), path, StringComparison.InvariantCultureIgnoreCase));
+        // Хост общий для книг и комиксов — различаем по первому сегменту пути (его может не быть)
+        return base.IsSameUrl(url) && url.Segments.Length > 1 && Paths.Any(path => string.Equals(url.GetSegment(1), path, StringComparison.InvariantCultureIgnoreCase));
     }
 
     public override Task Authorize()

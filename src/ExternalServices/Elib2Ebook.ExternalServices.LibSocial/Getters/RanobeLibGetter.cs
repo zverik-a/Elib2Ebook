@@ -13,6 +13,11 @@ public class RanobeLibGetter(BookGetterConfig config) : NewLibSocialGetterBase(c
 
     protected override int SiteId => 3;
 
+    public override bool IsSameUrl(Uri url)
+    {
+        return base.IsSameUrl(url) || url.Host == "old.ranobelib.me";
+    }
+
     protected override HtmlDocument ResponseToHtmlDoc(SocialLibBookChapter chapterResponse)
     {
         return chapterResponse.Content switch

@@ -23,5 +23,7 @@
     <PackageVersion Include="MudBlazor" Version="9.9.0" />
     <PackageVersion Include="OAuth.DotNetCore" Version="3.0.1" />
     <PackageVersion Include="StringTokenFormatter" Version="9.0.1" />
+    <!-- 2.1.x под Apache-2.0; 3.x требует лицензию Six Labors -->
+    <PackageVersion Include="SixLabors.ImageSharp" Version="2.1.13" />
   </ItemGroup>
 </Project>

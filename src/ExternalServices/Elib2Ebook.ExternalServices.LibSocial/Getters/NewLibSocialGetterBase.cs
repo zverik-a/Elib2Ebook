@@ -21,7 +21,7 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
 {
     private static Uri AuthHost => new("https://auth.lib.social/");
 
-    private static Uri ApiHost => new("https://api.cdnlibs.org/");
+    protected virtual Uri ApiHost => new("https://api.cdnlibs.org/");
 
     private static Uri BaseImageHost => new("https://cover.imglib.info/");
 
@@ -78,9 +78,24 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
     {
         await base.Init();
 
-        Config.Client.DefaultRequestHeaders.Remove("Site-Id");
-        Config.Client.DefaultRequestHeaders.Add("Site-Id", SiteId.ToString());
-        Config.Client.DefaultRequestHeaders.Add("Referer", SystemUrl.ToString());
+        var headers = Config.Client.DefaultRequestHeaders;
+
+        // Заголовки реального браузера: с User-Agent по умолчанию API отвечает хуже
+        headers.Remove("User-Agent");
+        headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36");
+        headers.Remove("Accept");
+        headers.Add("Accept", "*/*");
+
+        // Токен для закрытых/ограниченных глав (--token). Authorize() перезапишет его, если указаны логин и пароль
+        if (!string.IsNullOrWhiteSpace(Config.Options.Token))
+        {
+            headers.Authorization = new AuthenticationHeaderValue("Bearer", Config.Options.Token);
+        }
+
+        headers.Remove("Site-Id");
+        headers.Add("Site-Id", SiteId.ToString());
+        headers.Remove("Referer");
+        headers.Add("Referer", SystemUrl.ToString());
 
         try
         {
@@ -314,7 +329,12 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
             throw new Exception($"Ошибка загрузки оглавления. Код {(int)response.StatusCode} ({response.StatusCode}).");
         }
 
-        var result = await response.Content.ReadFromJsonAsync<SocialLibBookChapters>().ContinueWith(t => t.Result.Chapters);
+        var result = (await response.Content.ReadFromJsonAsync<SocialLibBookChapters>())?.Chapters ?? [];
+        if (result.Count == 0 && string.IsNullOrWhiteSpace(Config.Options.Token))
+        {
+            Config.Logger.LogInformation("Оглавление пустое. Возможно, главы закрыты — попробуйте указать --token");
+        }
+
         return SliceToc(WhereBranchIdEqualTo(result, bid), c => c.Name);
     }
 
@@ -371,21 +391,36 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
             return result;
         }
 
-        foreach (var socialChapter in await GetToc(book, bid))
+        var toc = (await GetToc(book, bid)).ToArray();
+        var failed = 0;
+
+        for (var i = 0; i < toc.Length; i++)
         {
+            var socialChapter = toc[i];
             var title = socialChapter.Name.ReplaceNewLine();
-            Config.Logger.LogInformation($"Загружаю главу {title.CoverQuotes()}");
+            Config.Logger.LogInformation($"Загружаю главу [{i + 1}/{toc.Length}] {title.CoverQuotes()}");
 
-            var chapter = new Chapter
+            try
             {
-                Title = title,
-            };
+                var chapterDoc = await GetChapter(book, socialChapter, bid);
+                result.Add(new Chapter
+                {
+                    Title = title,
+                    Images = await GetImages(chapterDoc, ImagesHost),
+                    Content = chapterDoc.DocumentNode.InnerHtml,
+                });
+            }
+            catch (Exception ex)
+            {
+                // Повторы уже выполнены внутри GetFromJsonWithTriesAsync — пропускаем главу, но не всю книгу
+                failed++;
+                Config.Logger.LogError($"Не удалось загрузить главу {title.CoverQuotes()}. {ex.Message}");
+            }
+        }
 
-            var chapterDoc = await GetChapter(book, socialChapter, bid);
-            chapter.Images = await GetImages(chapterDoc, ImagesHost);
-            chapter.Content = chapterDoc.DocumentNode.InnerHtml;
-
-            result.Add(chapter);
+        if (failed > 0)
+        {
+            Config.Logger.LogWarning($"Не загружено глав: {failed} из {toc.Length}");
         }
 
         return result;
@@ -393,13 +428,14 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
 
     private async Task<HtmlDocument> GetChapter(RanobeLibBookDetails book, SocialLibBookChapter chapter, string bid)
     {
-        var uri = ApiHost.MakeRelativeUri($"/api/manga/{book.Data.SlugUrl}/chapter?number={chapter.Number}&volume={chapter.Volume}");
+        // Числовой id работает на всех сайтах семейства, slug_url — не везде (например, hentailib)
+        var uri = ApiHost.MakeRelativeUri($"/api/manga/{book.Data.Id?.ToString() ?? book.Data.SlugUrl}/chapter?number={chapter.Number}&volume={chapter.Volume}");
         if (!string.IsNullOrWhiteSpace(bid))
         {
             uri = uri.AppendQueryParameter("branch_id", bid);
         }
 
-        var chapterResponse = await Config.Client.GetFromJsonWithTriesAsync<SocialLibBookChapterResponse>(uri, TimeSpan.FromSeconds(30));
+        var chapterResponse = await Config.Client.GetFromJsonWithTriesAsync<SocialLibBookChapterResponse>(uri, TimeSpan.FromSeconds(2));
         return ResponseToHtmlDoc(chapterResponse.Data);
     }
 
@@ -496,6 +532,7 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
     {
         return details.Data.Summary switch
         {
+            null => new HtmlDocument(),
             JsonValue e => e.GetValue<string>().AsHtmlDoc(),
             JsonObject o => AsHtml([], o.Deserialize<SocialLibChapterContent>().Content).AsHtmlDoc(),
             _ => throw new Exception("Неизвестный тип"),

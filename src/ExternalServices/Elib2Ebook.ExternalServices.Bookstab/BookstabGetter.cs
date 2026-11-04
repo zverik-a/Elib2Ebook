@@ -87,7 +87,7 @@ public class BookstabGetter(BookGetterConfig config) : GetterBase(config)
         while (true)
         {
             using var response = await Config.Client.GetAsync(_apiUrl.MakeRelativeUri($"/api/reader-get/{bookId}/{chapterId}"));
-            if (response.StatusCode == HttpStatusCode.Forbidden)
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
             {
                 Config.Logger.LogInformation("Очень много запросов. Подождем...");
                 await Task.Delay(TimeSpan.FromSeconds(10));

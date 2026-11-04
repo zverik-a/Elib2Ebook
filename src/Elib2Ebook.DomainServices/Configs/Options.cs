@@ -39,8 +39,8 @@ public class Options
     [Option('t', "timeout", Required = false, HelpText = "Timeout для запросов в секундах", Default = 120)]
     public int Timeout { get; set; }
 
-    [Option('d', "delay", Required = false, HelpText = "Задержка между запросами в секундах", Default = 0)]
-    public int Delay { get; set; }
+    [Option('d', "delay", Required = false, HelpText = "Задержка между запросами в секундах (можно дробную, например 0.5)", Default = 0.0)]
+    public double Delay { get; set; }
 
     [Option("no-image", Required = false, HelpText = "Не загружать картинки")]
     public bool NoImage { get; set; }
@@ -74,6 +74,21 @@ public class Options
 
     [Option("book-name-pattern", Required = false, HelpText = "Шаблон имени файла.", Default = "{Author.Name} - {Book.Title}")]
     public string BookNamePattern { get; set; } = "{Author.Name} - {Book.Title}";
+
+    [Option("token", Required = false, HelpText = "Bearer токен для доступа к закрытым/ограниченным главам (lib.social)")]
+    public string Token { get; set; }
+
+    [Option("strict-ssl", Required = false, HelpText = "Проверять SSL сертификаты сайтов (по умолчанию проверка отключена)")]
+    public bool StrictSsl { get; set; }
+
+    [Option("webp", Required = false, HelpText = "Конвертировать картинки epub в WebP (меньше размер, но не все читалки поддерживают)")]
+    public bool Webp { get; set; }
+
+    [Option("webp-quality", Required = false, HelpText = "Качество WebP (1-100)", Default = 85)]
+    public int WebpQuality { get; set; } = 85;
+
+    [Option("max-image-size", Required = false, HelpText = "Максимальная сторона картинки в пикселях при --webp (0 - без изменений)", Default = 0)]
+    public int MaxImageSize { get; set; }
 
     public bool HasAdditionalType(AdditionalTypeEnum type)
         => Additional && (AdditionalTypes == null || !AdditionalTypes.Any() || AdditionalTypes.Contains(type));

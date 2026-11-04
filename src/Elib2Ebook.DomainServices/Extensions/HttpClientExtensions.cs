@@ -9,126 +9,100 @@ public static class HttpClientExtensions
 {
     private const int MAX_TRY_COUNT = 5;
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MaxRetryAfter = TimeSpan.FromSeconds(120);
 
-    private static TimeSpan GetTimeout(TimeSpan errorTimeout)
+    /// <summary>
+    /// Ответы, повтор которых бессмысленен: запрос некорректен или ресурса нет.
+    /// 403 намеренно повторяем — анти-бот защиты (DDoS-Guard и т.п.) часто отдают его временно.
+    /// </summary>
+    private static bool IsPermanentFailure(HttpStatusCode code) => code is
+        HttpStatusCode.BadRequest or
+        HttpStatusCode.Unauthorized or
+        HttpStatusCode.NotFound or
+        HttpStatusCode.MethodNotAllowed or
+        HttpStatusCode.Gone;
+
+    private static bool IsTransientException(Exception ex) => ex is HttpRequestException or TaskCanceledException or IOException;
+
+    /// <summary>
+    /// Экспоненциальная задержка с джиттером: base, 2*base, 4*base... но не больше MaxBackoff
+    /// </summary>
+    public static TimeSpan GetBackoff(TimeSpan errorTimeout, int attempt)
     {
-        return errorTimeout == TimeSpan.Zero ? DefaultTimeout : errorTimeout;
+        var baseDelay = errorTimeout == TimeSpan.Zero ? DefaultTimeout : errorTimeout;
+        var delay = baseDelay.TotalMilliseconds * Math.Pow(2, attempt);
+        var jitter = Random.Shared.NextDouble() * 0.25 * delay;
+        return TimeSpan.FromMilliseconds(Math.Min(delay + jitter, MaxBackoff.TotalMilliseconds));
     }
 
-    public static async Task<HttpResponseMessage> GetWithTriesAsync(this HttpClient client, Uri url, TimeSpan errorTimeout = default)
+    /// <summary>
+    /// Задержка из заголовка Retry-After (секунды или дата), если сервер его прислал
+    /// </summary>
+    public static TimeSpan? GetRetryAfter(HttpResponseMessage response)
     {
-        Exception lastEx = null;
-
-        for (var i = 0; i < MAX_TRY_COUNT; i++)
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter == null)
         {
-            try
-            {
-                var response = await client.GetAsync(url);
-
-                if (response.StatusCode != HttpStatusCode.OK)
-                {
-                    if (i == MAX_TRY_COUNT - 1)
-                    {
-                        return response;
-                    }
-
-                    response.Dispose();
-                    await Task.Delay(GetTimeout(errorTimeout));
-                    continue;
-                }
-
-                return response;
-            }
-            catch (Exception ex)
-            {
-                lastEx = ex;
-                await Task.Delay(GetTimeout(errorTimeout));
-            }
+            return null;
         }
 
-        if (lastEx != null)
+        var delay = retryAfter.Delta ?? (retryAfter.Date.HasValue ? retryAfter.Date.Value - DateTimeOffset.UtcNow : null);
+        if (delay == null)
         {
-            throw lastEx;
+            return null;
         }
 
-        return null;
+        return delay < TimeSpan.Zero ? TimeSpan.Zero : delay > MaxRetryAfter ? MaxRetryAfter : delay;
     }
 
-    public static async Task<HttpResponseMessage> SendWithTriesAsync(this HttpClient client, Func<HttpRequestMessage> message, TimeSpan errorTimeout = default)
+    /// <summary>
+    /// Единая логика повторов. Возвращает первый успешный ответ, либо последний неуспешный
+    /// (вызывающий код сам проверяет StatusCode), либо бросает последнее исключение.
+    /// </summary>
+    private static async Task<HttpResponseMessage> SendWithRetry(Func<Task<HttpResponseMessage>> send, TimeSpan errorTimeout)
     {
-        Exception lastEx = null;
-
-        for (var i = 0; i < MAX_TRY_COUNT; i++)
+        for (var attempt = 0;; attempt++)
         {
+            var isLast = attempt == MAX_TRY_COUNT - 1;
+
+            HttpResponseMessage response;
             try
             {
-                var response = await client.SendAsync(message());
+                response = await send();
+            }
+            catch (Exception ex) when (!isLast && IsTransientException(ex))
+            {
+                await Task.Delay(GetBackoff(errorTimeout, attempt));
+                continue;
+            }
 
-                if (response.StatusCode != HttpStatusCode.OK)
-                {
-                    if (i == MAX_TRY_COUNT - 1)
-                    {
-                        return response;
-                    }
-
-                    response.Dispose();
-                    await Task.Delay(GetTimeout(errorTimeout));
-                    continue;
-                }
-
+            if (response.IsSuccessStatusCode || isLast || IsPermanentFailure(response.StatusCode))
+            {
                 return response;
             }
-            catch (Exception ex)
-            {
-                lastEx = ex;
-                await Task.Delay(GetTimeout(errorTimeout));
-            }
-        }
 
-        if (lastEx != null)
-        {
-            throw lastEx;
+            var delay = response.StatusCode == HttpStatusCode.TooManyRequests ? GetRetryAfter(response) : null;
+            response.Dispose();
+            await Task.Delay(delay ?? GetBackoff(errorTimeout, attempt));
         }
+    }
 
-        return null;
+    public static Task<HttpResponseMessage> GetWithTriesAsync(this HttpClient client, Uri url, TimeSpan errorTimeout = default)
+    {
+        return SendWithRetry(() => client.GetAsync(url), errorTimeout);
+    }
+
+    public static Task<HttpResponseMessage> SendWithTriesAsync(this HttpClient client, Func<HttpRequestMessage> message, TimeSpan errorTimeout = default)
+    {
+        return SendWithRetry(() => client.SendAsync(message()), errorTimeout);
     }
 
     public static async Task<HttpResponseMessage> PostWithTriesAsync(this HttpClient client, Uri url, HttpContent content, TimeSpan errorTimeout = default)
     {
-        Exception lastEx = null;
-
-        for (var i = 0; i < MAX_TRY_COUNT; i++)
-        {
-            try
-            {
-                var response = await client.PostAsync(url, content);
-
-                if (response.StatusCode != HttpStatusCode.OK)
-                {
-                    await Task.Delay(GetTimeout(errorTimeout));
-                    if (i == MAX_TRY_COUNT - 1)
-                    {
-                        return response;
-                    }
-
-                    continue;
-                }
-
-                return response;
-            }
-            catch (Exception ex)
-            {
-                lastEx = ex;
-                await Task.Delay(GetTimeout(errorTimeout));
-            }
-        }
-
-        if (lastEx != null)
-        {
-            throw lastEx;
-        }
-
-        return null;
+        // Буферизуем тело, чтобы его можно было отправить повторно (StreamContent иначе не перечитать)
+        await content.LoadIntoBufferAsync();
+        return await SendWithRetry(() => client.PostAsync(url, content), errorTimeout);
     }
 
     public static async Task<HtmlDocument> GetHtmlDocWithTriesAsync(this HttpClient client, Uri url, Encoding encoding = null)

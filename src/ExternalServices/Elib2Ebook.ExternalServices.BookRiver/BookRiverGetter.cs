@@ -167,7 +167,7 @@ public class BookriverGetter(BookGetterConfig config) : GetterBase(config)
     private async Task<HtmlDocument> GetChapter(long bookChapterId)
     {
         var response = await Config.Client.SendAsync(GetMessage(_apiUrl.MakeRelativeUri($"/api/v1/books/chapter/text/{bookChapterId}")));
-        if (response.StatusCode == HttpStatusCode.Forbidden)
+        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
         {
             return null;
         }

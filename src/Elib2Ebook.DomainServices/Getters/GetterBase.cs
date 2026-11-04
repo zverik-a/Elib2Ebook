@@ -34,8 +34,16 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable
 
         foreach (var header in Config.Client.DefaultRequestHeaders)
         {
+            if (header.Key.Equals("Referer", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             message.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
+
+        // Многие CDN отдают картинки только с Referer своего сайта
+        message.Headers.TryAddWithoutValidation("Referer", SystemUrl.ToString());
 
         return message;
     }
@@ -54,7 +62,7 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable
             Config.Logger.LogInformation($"Загружена картинка {response.RequestMessage!.RequestUri}");
             if (response is not { StatusCode: HttpStatusCode.OK })
             {
-                Console.WriteLine(response.StatusCode);
+                Config.Logger.LogWarning($"Не удалось загрузить картинку {uri}. Код {(int?)response?.StatusCode}");
                 return null;
             }
 
@@ -67,7 +75,7 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine(ex);
+            Config.Logger.LogWarning($"Не удалось загрузить картинку {uri}. {ex.Message}");
             return null;
         }
     }

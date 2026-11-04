@@ -19,6 +19,7 @@
         <PackageReference Include="Microsoft.Extensions.FileProviders.Physical"/>
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
         <PackageReference Include="StringTokenFormatter"/>
+        <PackageReference Include="SixLabors.ImageSharp"/>
     </ItemGroup>
     <ItemGroup>
         <Reference Include="EpubSharp">

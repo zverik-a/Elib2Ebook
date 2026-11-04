@@ -111,7 +111,7 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
     private async Task<T> GetApiData<T>(Uri uri)
     {
         var response = await Config.Client.SendAsync(GetDefaultMessage(uri, ApiUrl));
-        if (response.StatusCode == HttpStatusCode.Forbidden)
+        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
         {
             throw new Exception("Получен бан. Попробуйте позже.");
         }
