@@ -22,7 +22,7 @@ namespace Core.Logic.Getters.Litnet;
 
 public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(config) {
     private Uri ApiUrl => new($"https://api.{SystemUrl.Host}/");
-    
+
     //cloudflare :(
     protected virtual Uri ApiIp => ApiUrl;
 
@@ -38,14 +38,14 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
     private static byte[] Decrypt(string text) {
         using var aes = Aes.Create();
         const int IV_SHIFT = 16;
-        
-        aes.Key = Encoding.UTF8.GetBytes(SECRET); 
+
+        aes.Key = Encoding.UTF8.GetBytes(SECRET);
         aes.IV = Encoding.UTF8.GetBytes(text)[..IV_SHIFT];
-        
+
         var decryptor = aes.CreateDecryptor();
         using var ms = new MemoryStream(Convert.FromBase64String(text));
         using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
-        
+
         var output = new MemoryStream();
         cs.CopyTo(output);
 
@@ -83,7 +83,7 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
         if (!Config.HasCredentials && data!.AdultOnly) {
             throw new Exception("Произведение 18+. Необходимо добавить логин и пароль.");
         }
-        
+
         return data;
     }
 
@@ -101,18 +101,18 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
 
     private async Task<T> GetApiData<T>(Uri uri) {
         var response = await Config.Client.SendAsync(GetDefaultMessage(uri, ApiUrl));
-        if (response.StatusCode == HttpStatusCode.Forbidden) {
+        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests) {
             throw new Exception("Получен бан. Попробуйте позже.");
         }
 
         if (response.StatusCode == HttpStatusCode.NotFound) {
             return default;
         }
-        
+
         var data = await response.Content.ReadFromJsonAsync<T>();
         return data;
     }
-    
+
     public override async Task<Book> Get(Uri url) {
         var bookId = GetId(url);
 
@@ -129,7 +129,7 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
             Seria = await GetSeria(uri, litnetBook),
             Lang = litnetBook.Lang
         };
-            
+
         return book;
     }
 
@@ -154,7 +154,7 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
     private Author GetAuthor(LitnetBookResponse book) {
         return new Author((book.AuthorName ?? SystemUrl.Host).Trim(), SystemUrl.MakeRelativeUri($"/ru/{book.AuthorId}"));
     }
-    
+
     private IEnumerable<Author> GetCoAuthors(LitnetBookResponse book) {
         var result = new List<Author>();
         if (!string.IsNullOrWhiteSpace(book.CoAuthorName) && book.CoAuthorId.HasValue) {
@@ -165,15 +165,15 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
     }
 
     private static string GetAnnotation(LitnetBookResponse book) {
-        return string.IsNullOrWhiteSpace(book.Annotation) ? 
-            string.Empty : 
+        return string.IsNullOrWhiteSpace(book.Annotation) ?
+            string.Empty :
             string.Join("", book.Annotation.Split("\n", StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim().CoverTag("p")));
     }
-    
+
     private Task<TempFile> GetCover(LitnetBookResponse book) {
         return !string.IsNullOrWhiteSpace(book.Cover) ? SaveImage(book.Cover.AsUri()) : Task.FromResult(default(TempFile));
     }
-    
+
     protected override HttpRequestMessage GetImageRequestMessage(Uri uri) {
         if (uri.IsSameHost(SystemUrl) || uri.IsSameSubDomain(SystemUrl)) {
             return GetDefaultMessage(SystemUrl.MakeRelativeUri(uri.AbsolutePath), uri);
@@ -181,12 +181,12 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
 
         return base.GetImageRequestMessage(uri);
     }
-    
+
     private HttpRequestMessage GetDefaultMessage(Uri uri, Uri host, HttpContent content = null) {
         var message = new HttpRequestMessage(content == default ? HttpMethod.Get : HttpMethod.Post, uri);
         message.Content = content;
         message.Version = Config.Client.DefaultRequestVersion;
-        
+
         foreach (var header in Config.Client.DefaultRequestHeaders) {
             message.Headers.Add(header.Key, header.Value);
         }
@@ -201,15 +201,15 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
         if (Config.Options.NoChapters) {
             return result;
         }
-            
+
         var contents = await GetBookContents(token, bookId);
         if (contents == default || contents.Length == 0) {
             return result;
         }
-        
+
         var chapters = await GetToc(token, contents);
         var map = chapters.ToDictionary(t => t.Id);
-        
+
         foreach (var content in contents) {
             if (!map.TryGetValue(content.Id, out var litnetChapter)) {
                 litnetChapter = new LitnetChapterResponse();
@@ -219,7 +219,7 @@ public abstract class LitnetGetterBase(BookGetterConfig config) : GetterBase(con
             var chapter = new Chapter {
                 Title = (content.Title ?? book.Title).Trim()
             };
-            
+
             if (!string.IsNullOrWhiteSpace(litnetChapter.Text)) {
                 var chapterDoc = GetChapterDoc(Encoding.UTF8.GetString(Decrypt(litnetChapter.Text)));
                 chapter.Images = await GetImages(chapterDoc, SystemUrl);

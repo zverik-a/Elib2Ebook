@@ -9,7 +9,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="AngleSharp" Version="1.3.0" />
+        <PackageReference Include="AngleSharp" Version="1.9.1" />
         <PackageReference Include="CommandLineParser" Version="2.9.1" />
         <PackageReference Include="FlareSolverrSharp" Version="3.0.7" />
         <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
@@ -19,6 +19,7 @@
         <PackageReference Include="Microsoft.Extensions.FileProviders.Physical" Version="9.0.9" />
         <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9" />
         <PackageReference Include="OAuth.DotNetCore" Version="3.0.1" />
+        <PackageReference Include="SixLabors.ImageSharp" Version="2.1.13" />
         <PackageReference Include="StringTokenFormatter" Version="9.0.1" />
     </ItemGroup>
 
@@ -26,6 +27,10 @@
         <EmbeddedResource Include="Patterns\**\*.*">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </EmbeddedResource>
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Core.Tests" />
     </ItemGroup>
 
     <ItemGroup>

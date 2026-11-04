@@ -20,7 +20,14 @@
 
         <MudTextField @bind-Value="@_options.Login" Label="Логин" Variant="Variant.Outlined"/>
         <MudTextField @bind-Value="@_options.Password" Label="Пароль"  Variant="Variant.Outlined" InputType="@_passwordInput" Adornment="Adornment.End" AdornmentIcon="@_passwordInputIcon" OnAdornmentClick="ShowPassword" AdornmentAriaLabel="Показать пароль" />
-        
+        <MudTextField @bind-Value="@_options.Token" Label="Bearer токен (lib.social)" Variant="Variant.Outlined"/>
+
+        <div class="d-flex gap-x-4 align-center">
+            <MudCheckBox T="bool" @bind-Value="@_options.Webp" Label="WebP картинки в epub"/>
+            <MudNumericField T="int" @bind-Value="@_options.WebpQuality" Label="Качество" Min="1" Max="100" Variant="Variant.Outlined" Disabled="@(!_options.Webp)"/>
+            <MudNumericField T="int" @bind-Value="@_options.MaxImageSize" Label="Макс. сторона, px (0 — без изменений)" Min="0" Variant="Variant.Outlined" Disabled="@(!_options.Webp)"/>
+        </div>
+
         
         @if (_startEndCSwitcher) {
             <div class="d-flex gap-x-4">

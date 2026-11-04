@@ -15,7 +15,7 @@ using HtmlAgilityPack;
 using HtmlAgilityPack.CssSelectors.NetCore;
 using Microsoft.Extensions.Logging;
 
-namespace Core.Logic.Getters; 
+namespace Core.Logic.Getters;
 
 public class BookriverGetter(BookGetterConfig config) : GetterBase(config) {
     protected override Uri SystemUrl => new("https://bookriver.ru/");
@@ -23,7 +23,7 @@ public class BookriverGetter(BookGetterConfig config) : GetterBase(config) {
     private Uri _apiUrl => new($"https://api.{SystemUrl.Host}/");
 
     private string _token;
-    
+
     protected override string GetId(Uri url) => url.GetSegment(2);
 
     public override async Task Authorize() {
@@ -61,7 +61,7 @@ public class BookriverGetter(BookGetterConfig config) : GetterBase(config) {
             Annotation = doc.QuerySelector("span[itemprop=description]")?.InnerHtml,
             Seria = GetSeria(doc, url)
         };
-            
+
         return book;
     }
 
@@ -93,27 +93,27 @@ public class BookriverGetter(BookGetterConfig config) : GetterBase(config) {
         if (Config.Options.NoChapters) {
             return result;
         }
-        
+
         var internalId = await GetInternalBookId(bookId);
-        
+
         foreach (var bookChapter in await GetToc(internalId)) {
             Config.Logger.LogInformation($"Загружаю главу {bookChapter.Name.CoverQuotes()}");
             var chapter = new Chapter {
                 Title = bookChapter.Name
             };
-            
+
             var doc = await GetChapter(bookChapter.Id);
             if (doc != default) {
                 chapter.Images = await GetImages(doc, uri);
                 chapter.Content = doc.DocumentNode.InnerHtml;
             }
-            
+
             result.Add(chapter);
         }
 
         return result;
     }
-    
+
     protected virtual HttpRequestMessage GetMessage(Uri uri) {
         var message = new HttpRequestMessage(HttpMethod.Get, uri);
         message.Version = Config.Client.DefaultRequestVersion;
@@ -124,7 +124,7 @@ public class BookriverGetter(BookGetterConfig config) : GetterBase(config) {
         foreach (var header in Config.Client.DefaultRequestHeaders) {
             message.Headers.Add(header.Key, header.Value);
         }
-        
+
         return message;
     }
 
@@ -148,10 +148,10 @@ public class BookriverGetter(BookGetterConfig config) : GetterBase(config) {
 
     private async Task<HtmlDocument> GetChapter(long bookChapterId) {
         var response = await Config.Client.SendAsync(GetMessage(_apiUrl.MakeRelativeUri($"/api/v1/books/chapter/text/{bookChapterId}")));
-        if (response.StatusCode == HttpStatusCode.Forbidden) {
+        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests) {
             return default;
         }
-        
+
         var content = await response.Content.ReadAsStringAsync();
         return content.Deserialize<BookRiverApiResponse<BookRiverChapterContent>>().Data.Content.AsHtmlDoc();
     }

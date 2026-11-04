@@ -15,15 +15,16 @@ namespace Core.Logic.Getters.BooksYandex;
 
 public abstract class BooksYandexGetterBase(BookGetterConfig config) : GetterBase(config) {
     protected override Uri SystemUrl => new("https://books.yandex.ru/");
-    
+
     protected abstract string[] Paths { get; }
-    
+
     protected override string GetId(Uri url) {
         return url.GetSegment(2);
     }
 
     public override bool IsSameUrl(Uri url) {
-        return base.IsSameUrl(url) && Paths.Any(path => string.Equals(url.GetSegment(1), path, StringComparison.InvariantCultureIgnoreCase));
+        // Хост общий для книг и комиксов — различаем по первому сегменту пути (его может не быть)
+        return base.IsSameUrl(url) && url.Segments.Length > 1 && Paths.Any(path => string.Equals(url.GetSegment(1), path, StringComparison.InvariantCultureIgnoreCase));
     }
 
     public override Task Authorize() {
@@ -31,20 +32,20 @@ public abstract class BooksYandexGetterBase(BookGetterConfig config) : GetterBas
         if (string.IsNullOrWhiteSpace(token)) {
             throw new Exception("Не указан авторизационный token.");
         }
-        
+
         Config.Client.DefaultRequestHeaders.Add("auth-token", token);
         return Task.CompletedTask;
     }
-    
+
     public override async Task<Book> Get(Uri url) {
         var id = GetId(url);
 
         var path = url.GetSegment(1);
         url = SystemUrl.MakeRelativeUri($"/{path}/{id}");
-        
+
         var bookResponse = await GetBookResponse(path, id);
         var details = (BookmateBookBase)bookResponse.Book ?? (BookmateBookBase)bookResponse.AudioBook ?? bookResponse.Comicbook;
-        
+
         var book = new Book(url) {
             Cover = await GetCover(details),
             Title = details.Title,
@@ -54,14 +55,14 @@ public abstract class BooksYandexGetterBase(BookGetterConfig config) : GetterBas
         };
 
         book.Chapters = await FillChapters(book, bookResponse);
-        
+
         return book;
     }
 
     protected virtual Task<IEnumerable<Chapter>> FillChapters(Book book, BooksYandexResponse response) {
         return Task.FromResult<IEnumerable<Chapter>>([]);
     }
-    
+
     private async Task<BooksYandexResponse> GetBookResponse(string path, string id) {
         try {
             var response = await Config.Client.GetAsync($"https://api.bookmate.ru/api/v5/{path}/{id}".AsUri());
@@ -70,7 +71,7 @@ public abstract class BooksYandexGetterBase(BookGetterConfig config) : GetterBas
             }
 
             var booksYandexResponse = await response.Content.ReadFromJsonAsync<BooksYandexResponse>();
-            
+
             if (booksYandexResponse.AudioBook?.LinkedBooks?.Length > 0) {
                 var linkedResponse = await Config.Client.GetAsync($"https://api.bookmate.ru/api/v5/books/{booksYandexResponse.AudioBook.LinkedBooks[0]}".AsUri());
                 if (linkedResponse.StatusCode == HttpStatusCode.OK) {
@@ -87,12 +88,12 @@ public abstract class BooksYandexGetterBase(BookGetterConfig config) : GetterBas
             throw;
         }
     }
-    
+
     private Task<TempFile> GetCover(BookmateBookBase book) {
         var url = book.Cover.Large ?? book.Cover.Small;
         return !string.IsNullOrWhiteSpace(url) ? SaveImage(SystemUrl.MakeRelativeUri(url)) : Task.FromResult(default(TempFile));
     }
-    
+
     private Author GetAuthor(BookmateBookBase book) {
         var author = book.GetAuthor();
         return author == default ? new Author("BooksYandex") : new Author(author.Name, SystemUrl.MakeRelativeUri($"/authors/{author.Uuid}"));

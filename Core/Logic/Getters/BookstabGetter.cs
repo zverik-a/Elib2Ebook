@@ -12,7 +12,7 @@ using Core.Types.Common;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 
-namespace Core.Logic.Getters; 
+namespace Core.Logic.Getters;
 
 public class BookstabGetter(BookGetterConfig config) : GetterBase(config) {
     protected override Uri SystemUrl => new("https://bookstab.ru/");
@@ -34,17 +34,17 @@ public class BookstabGetter(BookGetterConfig config) : GetterBase(config) {
             Author = GetAuthor(data),
             Annotation = GetAnnotation(data?.Book)
         };
-            
+
         return book;
     }
 
     private Author GetAuthor(BookstabApiResponse book) {
         return new Author(book.Book.User.Pseudonym, SystemUrl.MakeRelativeUri($"/user/{book.Book.User.Name}"));
     }
-    
+
     private static string GetAnnotation(BookstabBook book) {
-        return string.IsNullOrWhiteSpace(book.Excerpt) ? 
-            string.Empty : 
+        return string.IsNullOrWhiteSpace(book.Excerpt) ?
+            string.Empty :
             string.Join("", book.Excerpt.Split("\n", StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim().CoverTag("p")));
     }
 
@@ -60,14 +60,14 @@ public class BookstabGetter(BookGetterConfig config) : GetterBase(config) {
             };
 
             Config.Logger.LogInformation($"Загружаю главу {bookChapter.Title.CoverQuotes()}");
-            
+
             var doc = await GetChapter(bookChapter.Id, bookId);
 
             if (doc != default) {
                 chapter.Images = await GetImages(doc, uri);
                 chapter.Content = doc.DocumentNode.InnerHtml;
             }
-            
+
             result.Add(chapter);
         }
 
@@ -77,7 +77,7 @@ public class BookstabGetter(BookGetterConfig config) : GetterBase(config) {
     private async Task<HtmlDocument> GetChapter(int chapterId, string bookId) {
         while (true) {
             using var response = await Config.Client.GetAsync(_apiUrl.MakeRelativeUri($"/api/reader-get/{bookId}/{chapterId}"));
-            if (response.StatusCode == HttpStatusCode.Forbidden) {
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests) {
                 Config.Logger.LogInformation("Очень много запросов. Подождем...");
                 await Task.Delay(TimeSpan.FromSeconds(10));
                 continue;

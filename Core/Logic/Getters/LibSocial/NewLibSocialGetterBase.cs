@@ -16,16 +16,18 @@ using Core.Types.SocialLib;
 using HtmlAgilityPack;
 using HtmlAgilityPack.CssSelectors.NetCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Core.Logic.Getters.LibSocial;
 
 public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBase(config) {
+
     private static Uri AuthHost => new("https://auth.lib.social/");
 
-    private static Uri ApiHost => new("https://api.cdnlibs.org/");
+    protected virtual Uri ApiHost => new("https://api.cdnlibs.org/");
 
     private static Uri BaseImageHost => new("https://cover.imglib.info/");
-    
+
     protected virtual Uri ImagesHost => BaseImageHost;
 
     private const string ALPHABET_BASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -33,19 +35,30 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
 
     protected abstract int SiteId { get; }
 
+
     public override async Task Init() {
         await base.Init();
 
-        Config.Client.DefaultRequestHeaders.Remove("Site-Id");
-        Config.Client.DefaultRequestHeaders.Add("Site-Id", SiteId.ToString());
+        // Заголовки реального браузера (перезаписываем только то, что отличается от GetterBase.Init)
+        var headers = Config.Client.DefaultRequestHeaders;
+        headers.Remove("User-Agent");
+        headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36");
+        headers.Remove("Accept");
+        headers.Add("Accept", "*/*");
+
+        if (!string.IsNullOrWhiteSpace(Config.Options.Token)) {
+            headers.Authorization = new AuthenticationHeaderValue("Bearer", Config.Options.Token);
+        }
+
+        headers.Remove("Site-Id");
+        headers.Add("Site-Id", SiteId.ToString());
+        headers.Remove("Referer");
+        headers.Add("Referer", SystemUrl.ToString());
 
         try {
-            var timeZoneId = TimeZoneInfo.Local.Id;
-            Config.Client.DefaultRequestHeaders.Remove("Client-Time-Zone");
-            Config.Client.DefaultRequestHeaders.Add("Client-Time-Zone", timeZoneId);
-        } catch (TimeZoneNotFoundException) {
-            // Игнорируем: таймзона влияет только на аналитические метрики сайта
-        } catch (InvalidTimeZoneException) {
+            headers.Remove("Client-Time-Zone");
+            headers.Add("Client-Time-Zone", TimeZoneInfo.Local.Id);
+        } catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) {
             // Игнорируем: таймзона влияет только на аналитические метрики сайта
         }
     }
@@ -58,11 +71,11 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
         var trimmed = value.Trim();
         return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength] + "…";
     }
-    
+
     private static string Challenge(string str) {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(str).AsSpan(0, Encoding.UTF8.GetByteCount(str)));
         var result = string.Empty;
-        
+
         for (var t = 0; t < bytes.Length; t += 3) {
             result += ALPHABET_CHALLENGE[bytes[t] >> 2];
             result += ALPHABET_CHALLENGE[(bytes[t] & 3) << 4 | bytes[t + 1] >> 4];
@@ -91,10 +104,10 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
         var secret = GetRandom(128);
         var state = GetRandom(40);
         var redirectUri = SystemUrl.MakeRelativeUri("/ru/front/auth/oauth/callback");
-        
+
         var challenge = Challenge(secret);
         var challengeUrl = AuthHost.MakeRelativeUri($"/auth/oauth/authorize?scope=&client_id=1&response_type=code&redirect_uri={redirectUri}&state={state}&code_challenge={challenge}&code_challenge_method=S256&prompt=consent");
-        
+
         var loginForm = await Config.Client.GetHtmlDocWithTriesAsync(challengeUrl);
         var tokenInput = loginForm.QuerySelector("input[name=_token]");
         if (tokenInput == default) {
@@ -125,7 +138,7 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
         payload = postForm
             .QuerySelectorAll("input[type=hidden]")
             .ToDictionary(input => input.Attributes["name"].Value, input => input.Attributes["value"].Value);
-        
+
         using var authorize = await Config.Client.PostAsync(AuthHost.MakeRelativeUri(postForm.Attributes["action"].Value), new FormUrlEncodedContent(payload));
         if ((int)authorize.StatusCode == 419) {
             throw new Exception("Авторизация отклонена (код 419). Обычно это означает истекший CSRF токен или необходимость пройти капчу. Попробуйте указать --flare");
@@ -173,6 +186,41 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
         return id is "book" or "read" or "manga" ? url.GetSegment(3) : id;
     }
 
+
+    /// <summary>
+    /// Аннотация приходит либо строкой, либо документом TipTap. Превращаем в HTML с абзацами.
+    /// </summary>
+    internal static string GetAnnotationHtml(JsonElement? summary) {
+        if (summary is not { } element) {
+            return string.Empty;
+        }
+
+        switch (element.ValueKind) {
+            case JsonValueKind.String:
+                return element.GetString() ?? string.Empty;
+            case JsonValueKind.Object:
+                var doc = element.Deserialize<TipTapDoc>();
+                if (doc == null) {
+                    return string.Empty;
+                }
+
+                return string.Concat(doc.Content
+                    .Select(GetPlainText)
+                    .Where(text => !string.IsNullOrWhiteSpace(text))
+                    .Select(text => $"<p>{text.HtmlEncode()}</p>"));
+            default:
+                return string.Empty;
+        }
+    }
+
+    private static string GetPlainText(TipTapNode node) {
+        if (node.Type == "hardBreak") {
+            return "\n";
+        }
+
+        return node.Text ?? string.Concat(node.Content.Select(GetPlainText));
+    }
+
     public override async Task<Book> Get(Uri url) {
         var bid = url.GetQueryParameter("bid");
         var details = await GetBookDetails(url);
@@ -183,7 +231,7 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
             Title = string.IsNullOrWhiteSpace(details.Data.RusName) ? details.Data.Name : details.Data.RusName,
             Author = GetAuthor(details),
             CoAuthors = GetCoAuthors(details),
-            Annotation = details.Data.Summary
+            Annotation = GetAnnotationHtml(details.Data.Summary)
         };
 
         return book;
@@ -198,16 +246,19 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
             .AppendQueryParameter("fields[]", "summary")
             .AppendQueryParameter("fields[]", "chap_count");
 
-        var response = await Config.Client.GetWithTriesAsync(url);
-        if (response == default) {
-            throw new Exception("Не удалось получить ответ от сайта при загрузке информации о книге");
+        using var response = await Config.Client.GetWithTriesAsync(url)
+            ?? throw new Exception("Не удалось получить ответ от сайта при загрузке информации о книге");
+
+        var content = await response.Content.ReadAsStringAsync();
+        if (content.Trim().StartsWith("<")) {
+            throw new Exception("Сайт вернул HTML вместо данных. Скорее всего, сработал Cloudflare. Попробуйте обновить FlareSolverr.");
         }
 
         if (response.StatusCode != HttpStatusCode.OK) {
-            throw new Exception($"Ошибка загрузки информации о книге. Код {(int)response.StatusCode} ({response.StatusCode}).");
+            throw new Exception($"Ошибка загрузки информации о книге. Код {(int)response.StatusCode}.");
         }
 
-        return await response.Content.ReadFromJsonAsync<RanobeLibBookDetails>();
+        return JsonSerializer.Deserialize<RanobeLibBookDetails>(content);
     }
 
     private async Task<IEnumerable<SocialLibBookChapter>> GetToc(RanobeLibBookDetails book, string bid) {
@@ -215,20 +266,33 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
 
         Config.Logger.LogInformation("Загружаю оглавление");
 
-        var response = await Config.Client.GetWithTriesAsync(url);
+        using var response = await Config.Client.GetWithTriesAsync(url);
         if (response == default) {
             throw new Exception("Не удалось получить ответ от сайта при загрузке оглавления");
         }
 
         if (response.StatusCode != HttpStatusCode.OK) {
-            throw new Exception($"Ошибка загрузки оглавления. Код {(int)response.StatusCode} ({response.StatusCode}).");
+            var errBody = await response.Content.ReadAsStringAsync();
+            throw new Exception($"Ошибка загрузки оглавления. Код {(int)response.StatusCode} ({response.StatusCode}). {TrimForLog(errBody)}");
         }
 
-        var result = await response.Content.ReadFromJsonAsync<SocialLibBookChapters>().ContinueWith(t => t.Result.Chapters);
-        if (!string.IsNullOrWhiteSpace(bid)) {
-            result = result.Where(c => c.Branches.Any(b => b.BranchId.ToString() == bid)).ToList();
+        var jsonRaw = await response.Content.ReadAsStringAsync();
+        var chaptersObj = JsonSerializer.Deserialize<SocialLibBookChapters>(jsonRaw);
+        var result = chaptersObj?.Chapters;
+
+        if (result == null) {
+            Config.Logger.LogInformation("Поле Chapters вернуло null при десериализации");
+            return Enumerable.Empty<SocialLibBookChapter>();
         }
-        
+
+        if (result.Count == 0 && string.IsNullOrWhiteSpace(Config.Options.Token)) {
+            Config.Logger.LogInformation("Оглавление пустое. Возможно, часть глав закрыта — попробуйте указать --token");
+        }
+
+        if (!string.IsNullOrWhiteSpace(bid)) {
+            result = result.Where(c => c.Branches != null && c.Branches.Any(b => b.BranchId.ToString() == bid)).ToList();
+        }
+
         return SliceToc(result, c => c.Name);
     }
 
@@ -236,23 +300,21 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
         var author = details.Data.Authors.FirstOrDefault();
         return author == default ? new Author("Ranobelib") : new Author(author.Name, SystemUrl.MakeRelativeUri($"/ru/people/{author.SlugUrl}"));
     }
-    
+
     private IEnumerable<Author> GetCoAuthors(RanobeLibBookDetails details) {
         return details.Data.Authors
             .Skip(1)
             .Select(author => new Author(author.Name, SystemUrl.MakeRelativeUri($"/ru/people/{author.SlugUrl}"))).ToList();
     }
-    
+
     private Task<TempFile> GetCover(RanobeLibBookDetails details) {
         return !string.IsNullOrWhiteSpace(details.Data.Cover.Default) ? SaveImage(details.Data.Cover.Default.AsUri()) : Task.FromResult(default(TempFile));
     }
 
     protected override HttpRequestMessage GetImageRequestMessage(Uri uri) {
-        uri = uri.Host == BaseImageHost.Host ? uri : uri.ReplaceHost(ImagesHost.Host);
-        
-        var message = base.GetImageRequestMessage(uri);
-        message.Headers.Add("Referer", SystemUrl.ToString());
-        return message;
+        // Referer = SystemUrl уже выставляется в GetterBase; хосты картинок (cover, media, static) не переписываем,
+        // так как пути на разных поддоменах различаются.
+        return base.GetImageRequestMessage(uri);
     }
 
     private async Task<IEnumerable<Chapter>> FillChapters(RanobeLibBookDetails book, string bid) {
@@ -260,32 +322,45 @@ public abstract class NewLibSocialGetterBase(BookGetterConfig config) : GetterBa
         if (Config.Options.NoChapters) {
             return result;
         }
-        
-        foreach (var socialChapter in await GetToc(book, bid)) {
+
+        var toc = (await GetToc(book, bid)).ToArray();
+        var failed = 0;
+
+        for (var c = 0; c < toc.Length; c++) {
+            var socialChapter = toc[c];
             var title = socialChapter.Name.ReplaceNewLine();
-            Config.Logger.LogInformation($"Загружаю главу {title.CoverQuotes()}");
-            
-            var chapter = new Chapter {
-                Title = title
-            };
+            Config.Logger.LogInformation($"Загружаю главу [{c + 1}/{toc.Length}] {title.CoverQuotes()}");
 
-            var chapterDoc = await GetChapter(book, socialChapter, bid);
-            chapter.Images = await GetImages(chapterDoc, ImagesHost);
-            chapter.Content = chapterDoc.DocumentNode.InnerHtml;
-
-            result.Add(chapter);
+            try {
+                var chapterDoc = await GetChapter(book, socialChapter, bid);
+                result.Add(new Chapter {
+                    Title = title,
+                    Images = await GetImages(chapterDoc, ImagesHost),
+                    Content = chapterDoc.DocumentNode.InnerHtml
+                });
+            } catch (Exception ex) {
+                // Повторы уже выполнены внутри GetFromJsonWithTriesAsync — пропускаем главу, но не всю книгу
+                failed++;
+                Config.Logger.LogError($"Не удалось загрузить главу {title.CoverQuotes()}. {ex.Message}");
+            }
         }
-            
+
+        if (failed > 0) {
+            Config.Logger.LogWarning($"Не загружено глав: {failed} из {toc.Length}");
+        }
+
         return result;
     }
 
     private async Task<HtmlDocument> GetChapter(RanobeLibBookDetails book, SocialLibBookChapter chapter, string bid) {
-        var uri = ApiHost.MakeRelativeUri($"/api/manga/{book.Data.SlugUrl}/chapter?number={chapter.Number}&volume={chapter.Volume}");
+        var uri = ApiHost.MakeRelativeUri($"/api/manga/{book.Data.Id}/chapter?number={chapter.Number}&volume={chapter.Volume}");
         if (!string.IsNullOrWhiteSpace(bid)) {
             uri = uri.AppendQueryParameter("branch_id", bid);
         }
-        
-        var chapterResponse = await Config.Client.GetFromJsonWithTriesAsync<SocialLibBookChapterResponse>(uri, TimeSpan.FromSeconds(30));
+
+        Config.Logger.LogDebug($"Запрос к API: {uri}");
+
+        var chapterResponse = await Config.Client.GetFromJsonWithTriesAsync<SocialLibBookChapterResponse>(uri, TimeSpan.FromSeconds(2));
         return ResponseToHtmlDoc(chapterResponse.Data);
     }
 

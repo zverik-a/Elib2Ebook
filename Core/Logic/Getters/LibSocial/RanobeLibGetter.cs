@@ -10,25 +10,30 @@ using Core.Types.SocialLib;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 
-namespace Core.Logic.Getters.LibSocial; 
+namespace Core.Logic.Getters.LibSocial;
 
 public class RanobeLibGetter(BookGetterConfig config) : NewLibSocialGetterBase(config) {
     protected override Uri SystemUrl => new("https://ranobelib.me/");
 
     protected override int SiteId => 3;
-    
+
+    public override bool IsSameUrl(Uri url) {
+        return base.IsSameUrl(url) || url.Host == "old.ranobelib.me";
+    }
+
     private static readonly Dictionary<string, string> RecursiveTag = new() {
         { "paragraph", "p" },
         { "orderedList", "ol" },
         { "listItem", "li" },
         { "blockquote", "blockquote" },
+        { "heading", "h3" }, // Все заголовки внутри глав превращаются в h3
     };
-    
+
     private static readonly Dictionary<string, string> InlineTag = new() {
         { "horizontalRule", "<hr />" },
         { "hardBreak", "<br />" },
     };
-    
+
     private static readonly Dictionary<string, string> MarkTag = new() {
         { "italic", "i" },
         { "bold", "b" },
@@ -40,10 +45,10 @@ public class RanobeLibGetter(BookGetterConfig config) : NewLibSocialGetterBase(c
 
         foreach (var content in contents) {
             if (RecursiveTag.TryGetValue(content.Type, out var tag)) {
-                sb.Append(AsHtml(chapterResponse, content.Content).ToString().CoverTag(tag)); 
+                sb.Append(AsHtml(chapterResponse, content.Content).ToString().CoverTag(tag));
                 continue;
             }
-            
+
             if (InlineTag.TryGetValue(content.Type, out tag)) {
                 sb.Append(tag);
                 continue;
@@ -51,37 +56,37 @@ public class RanobeLibGetter(BookGetterConfig config) : NewLibSocialGetterBase(c
 
             switch (content.Type) {
                 case "text": {
-                    var text = content.Text.HtmlEncode();
+                        var text = content.Text.HtmlEncode();
 
-                    foreach (var mark in content.Marks) {
-                        if (MarkTag.TryGetValue(mark.Type, out tag)) {
-                            text = text.CoverTag(tag);
-                        } else {
-                            Config.Logger.LogInformation($"Неизвестый тип форматирования {mark.Type}");
+                        foreach (var mark in content.Marks) {
+                            if (MarkTag.TryGetValue(mark.Type, out tag)) {
+                                text = text.CoverTag(tag);
+                            } else {
+                                Config.Logger.LogInformation($"Неизвестый тип форматирования {mark.Type}");
+                            }
                         }
-                    }
 
-                    sb.Append(text);
-                    continue;
-                }
+                        sb.Append(text);
+                        continue;
+                    }
                 case "image": {
-                    if (content.Attrs.TryGetValue("images", out var images)) {
-                        foreach (var image in images.Deserialize<Dictionary<string, string>[]>()) {
-                            if (!image.TryGetValue("image", out var imageId)) {
-                                continue;
+                        if (content.Attrs.TryGetValue("images", out var images)) {
+                            foreach (var image in images.Deserialize<Dictionary<string, string>[]>()) {
+                                if (!image.TryGetValue("image", out var imageId)) {
+                                    continue;
+                                }
+
+                                var attachment = chapterResponse.Attachments.FirstOrDefault(a => a.Name == imageId);
+                                if (attachment == default) {
+                                    continue;
+                                }
+
+                                sb.Append($"<img src=\"{attachment.Url}\" />");
                             }
-                            
-                            var attachment = chapterResponse.Attachments.FirstOrDefault(a => a.Name == imageId);
-                            if (attachment == default) {
-                                continue;
-                            }
-                            
-                            sb.Append($"<img src=\"{attachment.Url}\" />");
                         }
+
+                        continue;
                     }
-                
-                    continue;
-                }
                 default:
                     Config.Logger.LogInformation($"Неизвестый тип {content.Type}");
                     break;
@@ -90,7 +95,7 @@ public class RanobeLibGetter(BookGetterConfig config) : NewLibSocialGetterBase(c
 
         return sb;
     }
-    
+
     protected override HtmlDocument ResponseToHtmlDoc(SocialLibBookChapter chapterResponse) {
         return chapterResponse.Content switch {
             JsonValue e => e.GetValue<string>().AsHtmlDoc(),

@@ -22,18 +22,22 @@ public class SocialLibChapterBranch {
 public class SocialLibChapterAttachment {
     [JsonPropertyName("url")]
     public string Url { get; set; }
-    
+
     [JsonPropertyName("name")]
     public string Name { get; set; }
 }
 
 public class SocialLibBookChapter {
+
+    [JsonPropertyName("id")]
+    public int Id { get; set; } // Добавьте это поле сюда
+
     [JsonPropertyName("volume")]
     public string Volume { get; set; }
 
     [JsonPropertyName("number")]
     public string Number { get; set; }
-    
+
     [JsonPropertyName("branches")]
     public List<SocialLibChapterBranch> Branches { get; set; }
 
@@ -42,10 +46,10 @@ public class SocialLibBookChapter {
 
     [JsonPropertyName("pages")]
     public SocialLibPage[] Pages { get; set; } = [];
-    
+
     [JsonPropertyName("content")]
     public JsonNode Content { get; set; }
- 
+
     private string RawName { get; set; }
 
     [JsonPropertyName("name")]
@@ -65,7 +69,7 @@ public class SocialLibBookChapter {
 public class SocialLibChapterContent {
     [JsonPropertyName("type")]
     public string Type { get; set; }
-    
+
     [JsonPropertyName("text")]
     public string Text { get; set; }
 

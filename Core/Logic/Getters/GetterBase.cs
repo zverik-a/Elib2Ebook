@@ -17,7 +17,7 @@ using HtmlAgilityPack;
 using HtmlAgilityPack.CssSelectors.NetCore;
 using Microsoft.Extensions.Logging;
 
-namespace Core.Logic.Getters; 
+namespace Core.Logic.Getters;
 
 public abstract class GetterBase(BookGetterConfig config) : IDisposable {
     protected readonly BookGetterConfig Config = config;
@@ -35,12 +35,19 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
         message.Version = Config.Client.DefaultRequestVersion;
 
         foreach (var header in Config.Client.DefaultRequestHeaders) {
+            if (header.Key.Equals("Referer", StringComparison.OrdinalIgnoreCase)) {
+                continue;
+            }
+
             message.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
-        
+
+        // Многие CDN отдают картинки только с Referer своего сайта
+        message.Headers.TryAddWithoutValidation("Referer", SystemUrl.ToString());
+
         return message;
     }
-    
+
     /// <summary>
     /// Получение изображения
     /// </summary>
@@ -52,22 +59,22 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
             using var response = await Config.Client.SendWithTriesAsync(() => GetImageRequestMessage(uri));
             Config.Logger.LogInformation($"Загружена картинка {response.RequestMessage!.RequestUri}");
             if (response is not { StatusCode: HttpStatusCode.OK }) {
-                Console.WriteLine(response.StatusCode);
+                Config.Logger.LogWarning($"Не удалось загрузить картинку {uri}. Код {(int?)response?.StatusCode}");
                 return default;
             }
-            
+
             await using var stream = await response.Content.ReadAsStreamAsync();
 
             var extension = Path.GetExtension(uri.GetFileName());
-            var fullName = Guid.NewGuid() + (string.IsNullOrWhiteSpace(extension) ? ".jpg" : extension); 
-            
+            var fullName = Guid.NewGuid() + (string.IsNullOrWhiteSpace(extension) ? ".jpg" : extension);
+
             return await TempFile.Create(uri, Config.TempFolder.Path, fullName, stream);
         } catch (Exception ex) {
-            Console.WriteLine(ex);
+            Config.Logger.LogWarning($"Не удалось загрузить картинку {uri}. {ex.Message}");
             return default;
         }
     }
-        
+
     /// <summary>
     /// Загрузка изображений отдельной части
     /// </summary>
@@ -79,12 +86,12 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
         var tuples = doc.QuerySelectorAll("img, image").Select((img, i) => Tuple.Create(img, i));
         await Parallel.ForEachAsync(tuples, async (t, _) => {
             var img = t.Item1;
-            
+
             if (Config.Options.NoImage) {
                 toRemove.Add(img);
                 return;
             }
-            
+
             var path = img.Attributes["src"]?.Value ?? img.Attributes["data-src"]?.Value;
             if (string.IsNullOrWhiteSpace(path)) {
                 toRemove.Add(img);
@@ -127,36 +134,36 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
         if (!result.HasValue) {
             throw new Exception($"Глава с названием {name.CoverQuotes()} не найдена");
         }
-        
+
         return result.Value + 1;
     }
-    
+
     private static HtmlDocument SliceBook(EpubBook epubBook, EpubChapter epubChapter) {
         var doc = new HtmlDocument();
 
         var startChapter = epubBook.Resources.Html.First(h => HttpUtility.UrlDecode(h.AbsolutePath) == HttpUtility.UrlDecode(epubChapter.AbsolutePath));
         var startIndex = epubBook.Resources.Html.IndexOf(startChapter);
-        
+
         var chapter = epubBook.Resources.Html[startIndex].TextContent.AsHtmlDoc();
         foreach (var node in chapter.QuerySelector("body").ChildNodes) {
             doc.DocumentNode.AppendChild(node);
         }
-        
+
         for (var i = startIndex + 1; i < epubBook.Resources.Html.Count; i++) {
             var chapterContent = epubBook.Resources.Html[i];
             if (chapterContent.AbsolutePath == epubChapter.Next?.AbsolutePath) {
                 break;
             }
-            
+
             chapter = chapterContent.TextContent.AsHtmlDoc();
             foreach (var node in chapter.QuerySelector("body").ChildNodes) {
                 doc.DocumentNode.AppendChild(node);
             }
         }
-        
+
         return doc;
     }
-    
+
     protected async Task<IEnumerable<Chapter>> FillChaptersFromEpub(TempFile shortFile) {
         var result = new List<Chapter>();
         if (Config.Options.NoChapters) {
@@ -195,11 +202,11 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
                 sb.Append(textFileDoc.DocumentNode.InnerHtml);
 
             }
-            
+
             var chapter = new Chapter {
                 Title = epubBook.Title
             };
-            
+
             var content = sb.AsHtmlDoc();
             chapter.Images = await GetImages(content, epubBook);
             chapter.Content = content.DocumentNode.InnerHtml;
@@ -208,7 +215,7 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
 
         return result;
     }
-    
+
     private async Task<IEnumerable<TempFile>> GetImages(HtmlDocument doc, EpubBook book) {
         var images = new List<TempFile>();
         foreach (var img in doc.QuerySelectorAll("img")) {
@@ -228,7 +235,7 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
                 img.Remove();
                 continue;
             }
-            
+
             var image = await TempFile.Create(null, Config.TempFolder.Path, t.Href, t.Content);
             img.Attributes["src"].Value = image.FullName;
             images.Add(image);
@@ -247,28 +254,28 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
         if (!string.IsNullOrWhiteSpace(startName)) {
             start = GetIndexByName(toc, selector, startName);
         }
-        
+
         if (!string.IsNullOrWhiteSpace(endName)) {
             end = GetIndexByName(toc, selector, endName);
         }
 
         if (start.HasValue && end.HasValue) {
-            var startIndex = start.Value >= 0 ? start.Value : toc.Count + start.Value + 1; 
-            var endIndex = end.Value >= 0 ? end.Value : toc.Count + end.Value; 
-            
+            var startIndex = start.Value >= 0 ? start.Value : toc.Count + start.Value + 1;
+            var endIndex = end.Value >= 0 ? end.Value : toc.Count + end.Value;
+
             return toc.Skip(startIndex - 1).Take(endIndex - startIndex + 1);
         }
-        
+
         if (start.HasValue) {
-            var startIndex = start.Value >= 0 ? start.Value : toc.Count + start.Value + 1; 
+            var startIndex = start.Value >= 0 ? start.Value : toc.Count + start.Value + 1;
             return toc.Skip(startIndex - 1);
         }
-        
+
         if (end.HasValue) {
-            var endIndex = end.Value >= 0 ? end.Value : toc.Count + end.Value; 
+            var endIndex = end.Value >= 0 ? end.Value : toc.Count + end.Value;
             return toc.Take(endIndex);
         }
-        
+
         return toc;
     }
 
@@ -337,14 +344,14 @@ public abstract class GetterBase(BookGetterConfig config) : IDisposable {
     }
 
     public abstract Task<Book> Get(Uri url);
-        
+
     public virtual Task Init() {
         Config.Client.DefaultRequestVersion = HttpVersion.Version20;
         Config.Client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15");
         Config.Client.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
         Config.Client.DefaultRequestHeaders.Add("Accept-Language", "ru");
         Config.Client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
-        
+
         return Task.CompletedTask;
     }
 
